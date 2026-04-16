@@ -192,7 +192,7 @@ def _five_word_summary(text: str) -> str:
     Extract up to 5 words from the start of the text.
     Used for Group A personal email summaries (no LLM required).
     """
-    if not text:
+    if not text or not text.strip():
         return "New personal email"
     words = text.strip().split()
     return " ".join(words[:5])

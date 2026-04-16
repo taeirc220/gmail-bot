@@ -3,6 +3,7 @@
 .env.test
 token.json
 credentials.json
+credentials.json.json
 
 # Runtime data — gitignored but needed locally
 data/

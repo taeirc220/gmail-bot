@@ -80,7 +80,8 @@ def _is_group_a(email: dict, rules: dict) -> bool:
         return False
 
     # Condition 4: personal language in body
-    body = (email.get("body_text") or "").lower()
+    # Normalize punctuation → spaces so "hey," matches keyword "hey "
+    body = re.sub(r"[^\w\s]", " ", (email.get("body_text") or "").lower())
     personal_keywords = [kw.lower() for kw in personal_rules.get("personal_keywords", [])]
     if not any(kw in body for kw in personal_keywords):
         return False

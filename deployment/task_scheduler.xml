@@ -55,12 +55,8 @@
         EDIT THIS PATH: Replace with the full path to launcher.bat on your machine.
         Example: C:\Users\YourName\Documents\gmail-bot\deployment\launcher.bat
       -->
-      <Command>C:\PATH\TO\gmail-bot\deployment\launcher.bat</Command>
-      <!--
-        EDIT THIS PATH: Replace with the full path to your project root folder.
-        Example: C:\Users\YourName\Documents\gmail-bot
-      -->
-      <WorkingDirectory>C:\PATH\TO\gmail-bot</WorkingDirectory>
+      <Command>C:\Users\taeir\OneDrive\Desktop\gmail bot\deployment\launcher.bat</Command>
+      <WorkingDirectory>C:\Users\taeir\OneDrive\Desktop\gmail bot</WorkingDirectory>
     </Exec>
   </Actions>
 

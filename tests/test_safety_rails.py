@@ -163,7 +163,7 @@ class TestDryRunEnforcement:
 class TestWhitelistPrecedence:
     def test_whitelist_wins_over_high_confidence(self, db, mock_gmail, mock_notifier, tmp_path):
         wl = tmp_path / "whitelist.txt"
-        wl.write_text("news@newsletter.com\n")
+        wl.write_text("newsmsg_001@newsletter.com\n")
         mgr = _make_manager(db, mock_gmail, mock_notifier, str(wl))
         result = mgr.handle(_email("msg_001"), "high")
         assert result == "skipped_whitelist"
