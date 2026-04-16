@@ -1,0 +1,168 @@
+# Gmail Bot — Importance Classification Rules
+# Edit this file to tune what the bot considers important.
+# All keyword matching is case-insensitive.
+
+personal:
+  # Domains that are NEVER personal emails (commercial/bulk/automated senders)
+  blocked_domains:
+    - mailchimp.com
+    - sendgrid.net
+    - sendgrid.com
+    - constantcontact.com
+    - campaignmonitor.com
+    - klaviyo.com
+    - hubspot.com
+    - marketo.com
+    - amazonses.com
+    - bounce.com
+    - em.example.com
+
+  # Sender name patterns that indicate non-personal senders (matched as substrings)
+  blocked_sender_patterns:
+    - noreply
+    - no-reply
+    - no_reply
+    - donotreply
+    - do-not-reply
+    - orders
+    - support
+    - billing
+    - newsletter
+    - notifications
+    - alerts
+    - info
+    - team
+    - hello
+    - contact
+    - mailer
+    - automated
+    - system
+
+  # Words in the email body that suggest it's a personal message
+  personal_keywords:
+    - "i "
+    - "i'm"
+    - "i've"
+    - "i'll"
+    - "i'd"
+    - "we "
+    - "we've"
+    - "you "
+    - "your "
+    - "hey "
+    - "hi "
+    - "dear "
+    - "just wanted"
+    - "wanted to"
+    - "let me know"
+    - "let us know"
+    - "following up"
+    - "as discussed"
+    - "as we discussed"
+    - "reaching out"
+    - "checking in"
+
+tickets:
+  # Keywords in subject OR body that suggest a ticket/booking email
+  subject_keywords:
+    - ticket
+    - e-ticket
+    - eticket
+    - booking
+    - booking confirmation
+    - reservation
+    - booking reference
+    - order confirmation
+    - boarding pass
+    - seat
+    - admission
+    - your order
+    - purchase confirmation
+    - event confirmation
+
+  body_keywords:
+    - ticket
+    - e-ticket
+    - booking reference
+    - reservation number
+    - booking confirmation
+    - boarding pass
+    - seat number
+    - gate
+    - row
+    - barcode
+    - qr code
+    - scan this
+
+  # MIME types that count as "PDF attachment"
+  attachment_mime_types:
+    - application/pdf
+    - application/octet-stream  # sometimes PDFs are sent with this generic type
+
+job_replies:
+  # Keywords in subject OR body that suggest a job application response
+  subject_keywords:
+    - application
+    - interview
+    - position
+    - vacancy
+    - role
+    - hiring
+    - recruiter
+    - recruitment
+    - job offer
+    - offer letter
+    - your application
+    - we received your
+    - thank you for applying
+    - next steps
+    - candidate
+    - assessment
+    - screening
+
+  body_keywords:
+    - application
+    - interview
+    - position
+    - vacancy
+    - role
+    - recruiter
+    - recruitment
+    - we received your application
+    - thank you for applying
+    - thank you for your interest
+    - next steps
+    - job offer
+    - offer letter
+    - hiring manager
+    - background check
+    - assessment
+    - skills test
+    - shortlisted
+    - move forward
+
+  # HTTP header names that indicate bulk/mass emails (disqualify job reply classification)
+  blocked_headers:
+    - x-bulk-sender
+    - x-mailer-bulk
+    - x-newsletter
+    - precedence
+
+newsletters:
+  # Known bulk email sender domains (used to boost newsletter confidence)
+  bulk_domains:
+    - mailchimp.com
+    - sendgrid.net
+    - sendgrid.com
+    - constantcontact.com
+    - campaignmonitor.com
+    - klaviyo.com
+    - hubspot.com
+    - marketo.com
+    - substack.com
+    - convertkit.com
+    - aweber.com
+    - getresponse.com
+    - mailerlite.com
+    - activecampaign.com
+    - drip.com

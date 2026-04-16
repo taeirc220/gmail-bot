@@ -1,0 +1,11 @@
+# Newsletter Whitelist
+# Senders listed here will NEVER be unsubscribed or deleted, regardless of headers.
+# One entry per line. Two formats:
+#   exact email:   newsletter@example.com
+#   full domain:   @example.com   (matches all senders from that domain)
+#
+# Lines starting with # are comments and are ignored.
+#
+# Examples (remove the # to activate):
+# @substack.com
+# digest@example.com

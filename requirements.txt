@@ -1,0 +1,14 @@
+google-api-python-client==2.126.0
+google-auth-oauthlib==1.2.0
+google-auth-httplib2==0.2.0
+python-dotenv==1.0.1
+beautifulsoup4==4.12.3
+lxml==5.2.1
+PyYAML==6.0.1
+requests==2.31.0
+schedule==1.2.1
+flask==3.0.3
+plyer==2.1.0
+win10toast==0.9
+pytest==8.1.2
+pytest-mock==3.14.0
