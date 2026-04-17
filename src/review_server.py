@@ -295,12 +295,15 @@ def start_server(db_path: str, secret: str, port: int = 8080,
     logger.info("Dashboard starting on http://localhost:%d/?token=***", port)
     logging.getLogger("werkzeug").setLevel(logging.WARNING)
 
-    app.run(
-        host="127.0.0.1",
-        port=port,
-        debug=False,
-        use_reloader=False,
-    )
+    try:
+        app.run(
+            host="127.0.0.1",
+            port=port,
+            debug=False,
+            use_reloader=False,
+        )
+    except OSError as exc:
+        logger.error("Dashboard failed to bind on port %d: %s", port, exc)
 
 
 def open_review_page(secret: str, port: int = 8080) -> None:

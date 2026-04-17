@@ -18,6 +18,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import schedule
+import socket
 import yaml
 from dotenv import load_dotenv
 
@@ -31,6 +32,7 @@ from src.gmail_client import GmailClient, GmailAPIError
 from src.newsletter_manager import NewsletterManager
 from src.notifier import Notifier
 import src.review_server as review_server
+from src.tray_icon import TrayIcon
 
 logger = logging.getLogger(__name__)
 
@@ -160,6 +162,7 @@ def poll_cycle(
     newsletter_manager: NewsletterManager,
     rules: dict,
     overnight_buffer: list,
+    pause_event: threading.Event | None = None,
 ) -> None:
     """
     Single 1-minute poll cycle.
@@ -168,6 +171,10 @@ def poll_cycle(
     3. Classify and dispatch each message
     4. Process any resolved newsletter reviews
     """
+    if pause_event is not None and pause_event.is_set():
+        logger.debug("Polling paused — skipping cycle")
+        return
+
     newsletter_manager.reset_cycle_counter()
     quiet = notifier.is_quiet_hours()
 
@@ -340,8 +347,33 @@ def _with_retry(func, args: tuple, kwargs: dict, db: Database, notifier: Notifie
 # Main entry point
 # -------------------------------------------------------------------------
 
+def _find_available_port(start: int, attempts: int = 5) -> int:
+    """Find the first available port starting from `start`."""
+    for port in range(start, start + attempts):
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.bind(("127.0.0.1", port))
+                return port
+        except OSError:
+            continue
+    return start  # fallback — let Flask report the error naturally
+
+
 def main() -> None:
     setup_logging()
+
+    # ----------------------------------------------------------------
+    # Single-instance lock — prevents duplicate bot processes
+    # ----------------------------------------------------------------
+    try:
+        import ctypes
+        _mutex = ctypes.windll.kernel32.CreateMutexW(None, True, "GmailBotSingleInstance")
+        if ctypes.windll.kernel32.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
+            logger.info("Another Gmail Bot instance is already running. Exiting.")
+            sys.exit(0)
+    except Exception:
+        pass  # Non-Windows or ctypes unavailable — skip the lock
+
     logger.info("Gmail Automation Bot starting")
 
     try:
@@ -360,19 +392,56 @@ def main() -> None:
     except AuthError:
         sys.exit(1)
 
-    # Start the dashboard server in a background daemon thread
+    # ----------------------------------------------------------------
+    # Threading events for pause/resume and graceful shutdown
+    # ----------------------------------------------------------------
+    pause_event = threading.Event()   # set = polling paused
+    stop_event  = threading.Event()   # set = bot should exit
+
+    # ----------------------------------------------------------------
+    # Dashboard server — find an available port automatically
+    # ----------------------------------------------------------------
+    actual_port = _find_available_port(config["review_port"])
+    if actual_port != config["review_port"]:
+        logger.warning(
+            "Port %d was in use — dashboard running on port %d instead",
+            config["review_port"], actual_port,
+        )
+
     env_path = str(Path(__file__).parent.parent / ".env")
     review_thread = threading.Thread(
         target=review_server.start_server,
-        args=(config["db_path"], config["review_secret"], config["review_port"]),
+        args=(config["db_path"], config["review_secret"], actual_port),
         kwargs={"whitelist_path": config["whitelist_path"], "env_path": env_path},
         daemon=True,
         name="ReviewServer",
     )
     review_thread.start()
-    logger.info(
-        "Dashboard running at http://localhost:%d/?token=***", config["review_port"]
+    logger.info("Dashboard running at http://localhost:%d/?token=***", actual_port)
+
+    # ----------------------------------------------------------------
+    # System tray icon
+    # ----------------------------------------------------------------
+    tray = TrayIcon(
+        secret=config["review_secret"],
+        port=actual_port,
+        pause_event=pause_event,
+        stop_event=stop_event,
     )
+    tray_thread = threading.Thread(target=tray.start, daemon=True, name="TrayIcon")
+    tray_thread.start()
+
+    # ----------------------------------------------------------------
+    # Startup toast — tells the user the bot is alive
+    # ----------------------------------------------------------------
+    try:
+        notifier.send(
+            "Gmail Bot is running",
+            "Click the tray icon to open your dashboard.",
+            force=True,
+        )
+    except Exception:
+        pass
 
     overnight_buffer: list = []
     rules = config["rules"]
@@ -380,7 +449,8 @@ def main() -> None:
     def run_poll_cycle():
         _with_retry(
             poll_cycle,
-            args=(gmail_client, db, notifier, newsletter_manager, rules, overnight_buffer),
+            args=(gmail_client, db, notifier, newsletter_manager, rules,
+                  overnight_buffer, pause_event),
             kwargs={},
             db=db,
             notifier=notifier,
@@ -396,9 +466,11 @@ def main() -> None:
 
     logger.info("Polling started. Press Ctrl+C to stop.")
 
-    while True:
+    while not stop_event.is_set():
         schedule.run_pending()
         time.sleep(30)
+
+    logger.info("Gmail Bot shutting down cleanly.")
 
 
 if __name__ == "__main__":

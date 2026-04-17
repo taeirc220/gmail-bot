@@ -168,11 +168,94 @@ _BASE_CSS = """
                      padding: 8px 0; border-bottom: 1px solid #f1f3f4; }
   .whitelist-entry:last-of-type { border-bottom: none; }
   .wl-text { font-size: 13px; font-family: monospace; flex: 1; }
-  .empty-state { text-align: center; padding: 40px 20px; color: #9aa0a6; font-size: 14px; }
+  .empty-state { text-align: center; padding: 48px 20px; color: #9aa0a6; font-size: 14px; }
+  .empty-state .empty-icon { font-size: 40px; margin-bottom: 12px; }
+  .empty-state .empty-title { font-size: 16px; font-weight: 600; color: #5f6368;
+                               margin-bottom: 6px; }
+
+  /* ---- Tooltip ---- */
+  .tooltip-wrap { position: relative; display: inline-flex; align-items: center; gap: 4px; }
+  .tooltip-icon { color: #9aa0a6; font-size: 13px; cursor: help; user-select: none; }
+  .tooltip-text { visibility: hidden; opacity: 0; position: absolute; bottom: calc(100% + 6px);
+                  left: 50%; transform: translateX(-50%); background: #3c4043; color: #fff;
+                  font-size: 12px; padding: 6px 10px; border-radius: 6px; white-space: nowrap;
+                  max-width: 240px; white-space: normal; width: max-content; max-width: 220px;
+                  transition: opacity .15s; z-index: 100; pointer-events: none; }
+  .tooltip-wrap:hover .tooltip-text { visibility: visible; opacity: 1; }
+
+  /* ---- In-page toast notifications ---- */
+  #toast-container { position: fixed; bottom: 24px; right: 24px; z-index: 9999;
+                     display: flex; flex-direction: column; gap: 10px; }
+  .toast { background: #3c4043; color: #fff; padding: 12px 18px; border-radius: 8px;
+           font-size: 13px; box-shadow: 0 4px 12px rgba(0,0,0,.2);
+           animation: toast-in .25s ease; max-width: 300px; }
+  .toast.success { border-left: 4px solid #34a853; }
+  .toast.error   { border-left: 4px solid #ea4335; }
+  @keyframes toast-in { from { opacity:0; transform:translateY(12px); }
+                         to   { opacity:1; transform:translateY(0); } }
+
+  /* ---- Status bar (footer) ---- */
+  .status-bar { position: fixed; bottom: 0; left: 220px; right: 0; background: #fff;
+                border-top: 1px solid #e8eaed; padding: 6px 24px;
+                display: flex; align-items: center; gap: 20px; font-size: 12px;
+                color: #5f6368; z-index: 50; }
+  .status-bar .sb-dot { width: 7px; height: 7px; border-radius: 50%;
+                        background: #34a853; display: inline-block; margin-right: 5px; }
+  .status-bar .sb-dot.paused { background: #f29900; }
+  .main { padding-bottom: 40px; }
 </style>
 """
 
 _CHARTJS_CDN = '<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>'
+
+_TOAST_JS = """
+<script>
+  function showToast(msg, type) {
+    type = type || 'success';
+    const c = document.getElementById('toast-container');
+    const t = document.createElement('div');
+    t.className = 'toast ' + type;
+    t.textContent = msg;
+    c.appendChild(t);
+    setTimeout(() => { t.style.opacity = '0'; t.style.transition = 'opacity .4s';
+      setTimeout(() => t.remove(), 400); }, 3000);
+  }
+  // Show toast from URL param ?toast=message
+  (function() {
+    const p = new URLSearchParams(window.location.search);
+    if (p.get('toast')) showToast(decodeURIComponent(p.get('toast')));
+  })();
+</script>
+"""
+
+_STATUSBAR_JS = """
+<script>
+  (function() {
+    const TOKEN = document.currentScript ? null : null;
+    function updateStatusBar() {
+      const token = document.getElementById('sb-token') ?
+                    document.getElementById('sb-token').dataset.token : '';
+      fetch('/api/stats?token=' + token)
+        .then(r => r.json())
+        .then(s => {
+          const el = document.getElementById('sb-stats');
+          if (el) el.textContent =
+            'Today: ' + s.today_processed + ' processed · ' +
+            'Total: ' + s.total_processed + ' · ' +
+            'Pending review: ' + s.pending_reviews;
+        }).catch(() => {});
+    }
+    updateStatusBar();
+    setInterval(updateStatusBar, 60000);
+  })();
+</script>
+"""
+
+
+def _tooltip(label: str, tip: str) -> str:
+    return (f'<span class="tooltip-wrap">{label}'
+            f'<span class="tooltip-icon">ⓘ</span>'
+            f'<span class="tooltip-text">{_esc(tip)}</span></span>')
 
 
 def _layout(page: str, content: str, secret: str, stats: dict | None = None) -> str:
@@ -213,6 +296,16 @@ def _layout(page: str, content: str, secret: str, stats: dict | None = None) -> 
   <main class="main">
     {content}
   </main>
+  <div id="toast-container"></div>
+  <div class="status-bar">
+    <span class="sb-dot"></span>
+    <span>Bot running</span>
+    <span style="color:#e8eaed;">·</span>
+    <span id="sb-stats">Loading...</span>
+    <span id="sb-token" data-token="{secret}" style="display:none;"></span>
+  </div>
+  {_TOAST_JS}
+  {_STATUSBAR_JS}
 </body>
 </html>"""
 
@@ -269,22 +362,38 @@ def generate_dashboard(db: Database, secret: str) -> str:
     cards = f"""
     <div class="cards">
       <div class="card blue">
-        <div class="card-value">{stats['total_processed']}</div>
+        <div class="card-value" id="stat-processed">{stats['total_processed']}</div>
         <div class="card-label">Emails processed</div>
       </div>
       <div class="card green">
-        <div class="card-value">{stats['total_important']}</div>
+        <div class="card-value" id="stat-important">{stats['total_important']}</div>
         <div class="card-label">Important emails</div>
       </div>
       <div class="card red">
-        <div class="card-value">{stats['total_newsletters']}</div>
+        <div class="card-value" id="stat-newsletters">{stats['total_newsletters']}</div>
         <div class="card-label">Newsletters handled</div>
       </div>
       <div class="card yellow">
-        <div class="card-value">{stats['pending_reviews']}</div>
-        <div class="card-label">Pending reviews</div>
+        <div class="card-value" id="stat-pending">{stats['pending_reviews']}</div>
+        <div class="card-label">Needs your attention</div>
       </div>
-    </div>"""
+    </div>
+    <script>
+      (function() {{
+        function refreshCards() {{
+          const token = document.getElementById('sb-token').dataset.token;
+          fetch('/api/stats?token=' + token)
+            .then(r => r.json())
+            .then(s => {{
+              document.getElementById('stat-processed').textContent  = s.total_processed;
+              document.getElementById('stat-important').textContent  = s.total_important;
+              document.getElementById('stat-newsletters').textContent = s.total_newsletters;
+              document.getElementById('stat-pending').textContent    = s.pending_reviews;
+            }}).catch(() => {{}});
+        }}
+        setInterval(refreshCards, 60000);
+      }})();
+    </script>"""
 
     # Chart data for Chart.js
     labels = [r["date"] for r in chart_data]
@@ -328,7 +437,11 @@ def generate_dashboard(db: Database, secret: str) -> str:
             for r in recent
         )
     else:
-        feed_items = '<div class="empty-state">No emails processed yet.</div>'
+        feed_items = """<div class="empty-state">
+          <div class="empty-icon">📬</div>
+          <div class="empty-title">No emails processed yet</div>
+          <div>Your bot is running! Send yourself a test email and check back in a minute.</div>
+        </div>"""
 
     today_badge = (f'<span class="badge badge-important">{stats["today_processed"]} today</span>'
                    if stats["today_processed"] > 0 else "")
@@ -361,7 +474,11 @@ def generate_review_page(db: Database, secret: str) -> str:
     stats = db.get_stats()
 
     if count == 0:
-        body = '<div class="empty-state">No newsletters pending review. All clear! ✓</div>'
+        body = """<div class="empty-state">
+          <div class="empty-icon">✅</div>
+          <div class="empty-title">All clear — nothing needs your attention</div>
+          <div>New items will appear here automatically when the bot is unsure about a newsletter.</div>
+        </div>"""
     else:
         cards_html = "\n".join(_render_review_card(row, db, secret) for row in rows)
         body = f"""
@@ -386,10 +503,10 @@ def generate_review_page(db: Database, secret: str) -> str:
           }}
           function applyBulk() {{
             const dec = document.getElementById('bulkDecision').value;
-            if (!dec) {{ alert('Choose a bulk action first.'); return; }}
+            if (!dec) {{ showToast('Choose a bulk action first.', 'error'); return; }}
             const ids = Array.from(document.querySelectorAll('.review-checkbox:checked'))
                              .map(c => c.dataset.id);
-            if (!ids.length) {{ alert('No items selected.'); return; }}
+            if (!ids.length) {{ showToast('No items selected.', 'error'); return; }}
             if (!confirm('Apply "' + dec + '" to ' + ids.length + ' item(s)?')) return;
             const form = document.createElement('form');
             form.method = 'POST'; form.action = '/api/decision/bulk?token={secret}';
@@ -402,6 +519,40 @@ def generate_review_page(db: Database, secret: str) -> str:
             d.type = 'hidden'; d.name = 'decision'; d.value = dec;
             form.appendChild(d);
             document.body.appendChild(form); form.submit();
+          }}
+          async function decide(messageId, decision, btn) {{
+            const card = btn.closest('.review-card');
+            card.style.opacity = '0.4';
+            card.style.pointerEvents = 'none';
+            const token = document.getElementById('sb-token').dataset.token;
+            try {{
+              await fetch('/api/decision?token=' + token, {{
+                method: 'POST',
+                body: new URLSearchParams({{ message_id: messageId, decision: decision }})
+              }});
+              card.style.transition = 'opacity .3s, transform .3s';
+              card.style.opacity = '0';
+              card.style.transform = 'translateX(20px)';
+              setTimeout(() => {{
+                card.remove();
+                const remaining = document.querySelectorAll('.review-card').length;
+                const sub = document.querySelector('.page-sub');
+                if (sub) sub.textContent = remaining + ' newsletter' +
+                  (remaining !== 1 ? 's' : '') + ' awaiting your decision';
+                if (remaining === 0) {{
+                  document.querySelector('.panel') && (document.querySelector('.panel').innerHTML =
+                    '<div class="empty-state"><div class="empty-icon">✅</div>' +
+                    '<div class="empty-title">All clear!</div>' +
+                    '<div>All items have been reviewed.</div></div>');
+                }}
+              }}, 300);
+              const labels = {{ keep: 'Kept', unsubscribe: 'Unsubscribed', trash_only: 'Moved to trash' }};
+              showToast('✓ ' + (labels[decision] || decision));
+            }} catch(e) {{
+              card.style.opacity = '1';
+              card.style.pointerEvents = 'auto';
+              showToast('Failed to save decision', 'error');
+            }}
           }}
         </script>"""
 
@@ -427,14 +578,11 @@ def _render_review_card(row: dict, db: Database, secret: str) -> str:
     hint = f'<span class="prior-hint">Prior decision: {_esc(prior)}</span>' if prior else ""
 
     def _btn(decision: str, label: str, css: str) -> str:
-        return (f'<form method="POST" action="/api/decision?token={secret}">'
-                f'<input type="hidden" name="message_id" value="{msg_id}">'
-                f'<input type="hidden" name="decision"   value="{decision}">'
-                f'<button type="submit" class="btn {css} btn-sm">{label}</button>'
-                f'</form>')
+        return (f'<button type="button" class="btn {css} btn-sm" '
+                f'onclick="decide(\'{msg_id}\',\'{decision}\',this)">{label}</button>')
 
     return f"""
-    <div class="review-card">
+    <div class="review-card" id="card-{msg_id}">
       <input type="checkbox" class="review-checkbox" data-id="{msg_id}">
       <div class="review-card-body">
         <div class="review-sender">{sender}</div>
@@ -483,6 +631,23 @@ def generate_history_page(db: Database, secret: str,
       }}
     </script>"""
 
+    _CLASSIFICATION_LABELS = {
+        "important":  "Important",
+        "newsletter": "Newsletter",
+        "ignored":    "Ignored",
+        "unsure":     "Needs review",
+    }
+    _ACTION_LABELS = {
+        "notified":             "Notified",
+        "deleted":              "Moved to trash",
+        "dry_run_would_trash":  "Safe mode — skipped",
+        "queued_review":        "Queued for review",
+        "queued":               "Queued for review",
+        "none":                 "No action",
+        "actioned":             "Actioned",
+        "unsubscribed_trashed": "Unsubscribed & trashed",
+    }
+
     # Table rows
     if rows:
         tr_html = "\n".join(
@@ -491,8 +656,10 @@ def generate_history_page(db: Database, secret: str,
                          white-space:nowrap;">{_esc(r["sender"] or "")}</td>
               <td style="max-width:260px;overflow:hidden;text-overflow:ellipsis;
                          white-space:nowrap;">{_esc(r["subject"] or "(no subject)")}</td>
-              <td>{_badge(r["classification"], r["classification"])}</td>
-              <td style="color:#5f6368;font-size:12px;">{_esc(r["action_taken"] or "")}</td>
+              <td>{_badge(r["classification"],
+                          _CLASSIFICATION_LABELS.get(r["classification"], r["classification"]))}</td>
+              <td style="color:#5f6368;font-size:12px;">{_esc(
+                          _ACTION_LABELS.get(r["action_taken"] or "", r["action_taken"] or ""))}</td>
               <td style="color:#9aa0a6;font-size:12px;white-space:nowrap;">
                 {_fmt_date(r["processed_at"] or "")}</td>
             </tr>"""
@@ -501,13 +668,23 @@ def generate_history_page(db: Database, secret: str,
         table = f"""
         <table>
           <thead><tr>
-            <th>Sender</th><th>Subject</th><th>Classification</th>
-            <th>Action</th><th>Processed</th>
+            <th>Sender</th><th>Subject</th><th>Category</th>
+            <th>What we did</th><th>Processed</th>
           </tr></thead>
           <tbody>{tr_html}</tbody>
         </table>"""
     else:
-        table = '<div class="empty-state">No emails match this filter.</div>'
+        if classification == "all":
+            table = """<div class="empty-state">
+              <div class="empty-icon">📭</div>
+              <div class="empty-title">No emails processed yet</div>
+              <div>The bot will start logging activity here shortly.</div>
+            </div>"""
+        else:
+            table = """<div class="empty-state">
+              <div class="empty-icon">🔍</div>
+              <div class="empty-title">No emails match this filter</div>
+            </div>"""
 
     # Pagination
     def _plink(p: int, label: str, active: bool = False) -> str:
@@ -571,7 +748,11 @@ def generate_decisions_page(db: Database, secret: str) -> str:
           <tbody>{tr_html}</tbody>
         </table>"""
     else:
-        table = '<div class="empty-state">No decisions recorded yet.</div>'
+        table = """<div class="empty-state">
+          <div class="empty-icon">🗂️</div>
+          <div class="empty-title">No decisions made yet</div>
+          <div>These appear when you act on emails in the Review queue.</div>
+        </div>"""
 
     content = f"""
     <div class="page-header">
@@ -595,8 +776,8 @@ def generate_settings_page(db: Database, secret: str,
     stats = db.get_stats()
     errors = db.get_recent_errors(limit=20)
 
-    dry_badge = _badge("dry-run", "DRY RUN") if dry_run else _badge("live", "LIVE")
-    toggle_label = "Switch to LIVE" if dry_run else "Switch to DRY RUN"
+    dry_badge = _badge("dry-run", "Safe Mode ON") if dry_run else _badge("live", "Live Mode")
+    toggle_label = "Turn off Safe Mode" if dry_run else "Turn on Safe Mode"
 
     # Whitelist editor
     if whitelist_entries:
@@ -611,14 +792,18 @@ def generate_settings_page(db: Database, secret: str,
             for e in sorted(whitelist_entries)
         )
     else:
-        wl_rows = '<div style="font-size:13px;color:#9aa0a6;padding:12px 0;">No whitelist entries yet.</div>'
+        wl_rows = """<div class="empty-state" style="padding:16px 0;text-align:left;">
+          No entries yet — add an email or @domain.com below.
+        </div>"""
+
+    whitelist_title = _tooltip("Sender Whitelist",
+                               "Senders you add here will never be auto-deleted, no matter what.")
 
     whitelist_panel = f"""
     <div class="panel">
-      <div class="panel-title">Sender Whitelist</div>
+      <div class="panel-title">{whitelist_title}</div>
       <p style="font-size:12px;color:#5f6368;margin-bottom:16px;">
-        Whitelisted senders are never auto-deleted. Add exact email addresses
-        or <code>@domain.com</code> for entire domains.
+        Add exact email addresses or <code>@domain.com</code> for entire domains.
       </p>
       {wl_rows}
       <form method="POST" action="/api/whitelist/add?token={secret}"
@@ -630,15 +815,18 @@ def generate_settings_page(db: Database, secret: str,
       </form>
     </div>"""
 
-    # DRY_RUN toggle
+    # Safe Mode toggle
+    safe_mode_label = _tooltip("Safe Mode",
+                                "When on, the bot reads emails but never deletes "
+                                "or unsubscribes anything.")
     mode_panel = f"""
     <div class="panel">
       <div class="panel-title">Bot Mode</div>
       <div class="setting-row">
         <div>
-          <div class="setting-label">DRY RUN mode {dry_badge}</div>
-          <div class="setting-desc">When enabled, all actions are logged but no emails are
-            moved or unsubscribed.</div>
+          <div class="setting-label">{safe_mode_label} {dry_badge}</div>
+          <div class="setting-desc">{"Currently reading emails only — no actions taken." if dry_run
+            else "Currently active — bot will unsubscribe and trash newsletters."}</div>
         </div>
         <form method="POST" action="/api/dry_run/toggle?token={secret}">
           <button type="submit" class="btn {'btn-green' if dry_run else 'btn-yellow'}">
@@ -672,7 +860,11 @@ def generate_settings_page(db: Database, secret: str,
           <tbody>{err_rows}</tbody>
         </table>"""
     else:
-        err_table = '<div class="empty-state">No errors logged. All systems healthy ✓</div>'
+        err_table = """<div class="empty-state">
+          <div class="empty-icon">✅</div>
+          <div class="empty-title">No issues logged</div>
+          <div>All systems healthy — nothing to report.</div>
+        </div>"""
 
     errors_panel = f"""
     <div class="panel">
