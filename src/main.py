@@ -23,10 +23,12 @@ import yaml
 from dotenv import load_dotenv
 
 try:
-    import webview as _webview
-    _WEBVIEW_AVAILABLE = True
+    from PySide6.QtWidgets import QApplication, QMainWindow
+    from PySide6.QtWebEngineWidgets import QWebEngineView
+    from PySide6.QtCore import QUrl
+    _QT_AVAILABLE = True
 except ImportError:
-    _WEBVIEW_AVAILABLE = False
+    _QT_AVAILABLE = False
 
 # Ensure src/ is importable when running as a script
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -490,40 +492,49 @@ def main() -> None:
     scheduler_thread.start()
 
     # ----------------------------------------------------------------
-    # Desktop dashboard window (pywebview)
-    # If pywebview is unavailable, fall back to browser-only mode.
+    # Desktop dashboard window (PySide6 QWebEngineView)
+    # Falls back to browser-only mode if PySide6 is unavailable.
     # ----------------------------------------------------------------
     dashboard_url = (
         f"http://localhost:{actual_port}/?token={config['review_secret']}"
     )
 
-    if _WEBVIEW_AVAILABLE:
-        import webview
-        window = webview.create_window(
-            "Gmailbot",
-            dashboard_url,
-            hidden=True,
-            width=1280,
-            height=800,
-            min_size=(900, 600),
-        )
+    if _QT_AVAILABLE:
+        qt_app = QApplication.instance() or QApplication(sys.argv)
+        qt_app.setQuitOnLastWindowClosed(False)  # keep running when window is hidden
 
-        def _on_closing():
-            # Hide instead of destroy — bot keeps running when user closes the window.
-            threading.Thread(target=window.hide, daemon=True).start()
-            return False  # cancel default destruction
+        class _DashboardWindow(QMainWindow):
+            def closeEvent(self, event):
+                event.ignore()   # don't quit — just hide
+                self.hide()
 
-        window.events.closing += _on_closing
+        qt_win = _DashboardWindow()
+        qt_win.setWindowTitle("Gmailbot")
+        qt_win.resize(1280, 800)
+        qt_win.setMinimumSize(900, 600)
 
-        # Give the tray icon access so it can show/destroy the window.
-        tray.set_window(window)
+        web_view = QWebEngineView()
+        web_view.setUrl(QUrl(dashboard_url))
+        qt_win.setCentralWidget(web_view)
+        # Hidden at startup — user opens via tray icon
 
-        logger.info("Starting desktop dashboard window.")
-        webview.start()   # blocks main thread until window.destroy() is called
+        class _WindowAdapter:
+            """Adapter so TrayIcon can call .show()/.destroy() generically."""
+            def show(self):
+                qt_win.show()
+                qt_win.raise_()
+                qt_win.activateWindow()
+
+            def destroy(self):
+                qt_app.quit()   # unblocks qt_app.exec() below
+
+        tray.set_window(_WindowAdapter())
+
+        logger.info("Starting desktop dashboard window (PySide6).")
+        qt_app.exec()   # blocks main thread until qt_app.quit() is called
         logger.info("Gmailbot shutting down cleanly.")
     else:
-        # No pywebview — stay in browser-only mode, keep scheduler running.
-        logger.warning("pywebview not available — dashboard runs in browser only.")
+        logger.warning("PySide6 not available — dashboard runs in browser only.")
         while not stop_event.is_set():
             time.sleep(30)
         logger.info("Gmailbot shutting down cleanly.")

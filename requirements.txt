@@ -12,9 +12,6 @@ plyer==2.1.0
 win10toast==0.9
 pystray==0.19.5
 pillow==12.2.0
-pywebview==6.2.1
-proxy_tools
-bottle
-typing_extensions
+PySide6
 pytest==8.1.2
 pytest-mock==3.14.0
