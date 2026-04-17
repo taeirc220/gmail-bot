@@ -22,6 +22,9 @@ import socket
 import yaml
 from dotenv import load_dotenv
 
+import platform
+_IS_WINDOWS = platform.system() == "Windows"
+
 try:
     from PySide6.QtWidgets import QApplication, QMainWindow
     from PySide6.QtWebEngineWidgets import QWebEngineView
@@ -84,6 +87,9 @@ def load_config() -> dict:
         "test_mode": os.getenv("TEST_MODE", "false").lower() == "true",
         "quiet_hours_start": int(os.getenv("QUIET_HOURS_START", "22")),
         "quiet_hours_end": int(os.getenv("QUIET_HOURS_END", "7")),
+        "ntfy_topic": os.getenv("NTFY_TOPIC", ""),
+        "ntfy_url": os.getenv("NTFY_URL", "https://ntfy.sh"),
+        "dashboard_host": os.getenv("DASHBOARD_HOST", "127.0.0.1"),
         "whitelist_path": str(
             Path(__file__).parent.parent / "config" / "newsletter_whitelist.txt"
         ),
@@ -147,6 +153,8 @@ def initialize_components(config: dict):
     notifier = Notifier(
         quiet_hours_start=config["quiet_hours_start"],
         quiet_hours_end=config["quiet_hours_end"],
+        ntfy_topic=config["ntfy_topic"],
+        ntfy_url=config["ntfy_url"],
     )
 
     newsletter_manager = NewsletterManager(
@@ -420,27 +428,34 @@ def main() -> None:
         )
 
     env_path = str(Path(__file__).parent.parent / ".env")
+    dashboard_host = config["dashboard_host"]
     review_thread = threading.Thread(
         target=review_server.start_server,
         args=(config["db_path"], config["review_secret"], actual_port),
-        kwargs={"whitelist_path": config["whitelist_path"], "env_path": env_path},
+        kwargs={
+            "host": dashboard_host,
+            "whitelist_path": config["whitelist_path"],
+            "env_path": env_path,
+        },
         daemon=True,
         name="ReviewServer",
     )
     review_thread.start()
-    logger.info("Dashboard running at http://localhost:%d/?token=***", actual_port)
+    logger.info("Dashboard running at http://%s:%d/?token=***", dashboard_host, actual_port)
 
     # ----------------------------------------------------------------
-    # System tray icon
+    # System tray icon (Windows only)
     # ----------------------------------------------------------------
-    tray = TrayIcon(
-        secret=config["review_secret"],
-        port=actual_port,
-        pause_event=pause_event,
-        stop_event=stop_event,
-    )
-    tray_thread = threading.Thread(target=tray.start, daemon=True, name="TrayIcon")
-    tray_thread.start()
+    tray = None
+    if _IS_WINDOWS:
+        tray = TrayIcon(
+            secret=config["review_secret"],
+            port=actual_port,
+            pause_event=pause_event,
+            stop_event=stop_event,
+        )
+        tray_thread = threading.Thread(target=tray.start, daemon=True, name="TrayIcon")
+        tray_thread.start()
 
     # ----------------------------------------------------------------
     # Startup toast — tells the user the bot is alive
@@ -492,14 +507,14 @@ def main() -> None:
     scheduler_thread.start()
 
     # ----------------------------------------------------------------
-    # Desktop dashboard window (PySide6 QWebEngineView)
-    # Falls back to browser-only mode if PySide6 is unavailable.
+    # Desktop dashboard window (Windows only — PySide6 QWebEngineView)
+    # On Linux/cloud: the scheduler thread runs headlessly; main thread just waits.
     # ----------------------------------------------------------------
     dashboard_url = (
         f"http://localhost:{actual_port}/?token={config['review_secret']}"
     )
 
-    if _QT_AVAILABLE:
+    if _IS_WINDOWS and _QT_AVAILABLE:
         qt_app = QApplication.instance() or QApplication(sys.argv)
         qt_app.setQuitOnLastWindowClosed(False)  # keep running when window is hidden
 
@@ -539,15 +554,20 @@ def main() -> None:
             def destroy(self):
                 bridge.quit_requested.emit()
 
-        tray.set_window(_WindowAdapter())
+        if tray is not None:
+            tray.set_window(_WindowAdapter())
 
         logger.info("Starting desktop dashboard window (PySide6).")
         qt_app.exec()   # blocks main thread until qt_app.quit() is called
         logger.info("Gmailbot shutting down cleanly.")
     else:
-        logger.warning("PySide6 not available — dashboard runs in browser only.")
-        while not stop_event.is_set():
-            time.sleep(30)
+        # Linux/cloud or no Qt: run headlessly — dashboard is accessible via browser.
+        if not _IS_WINDOWS:
+            logger.info(
+                "Running headlessly. Dashboard at http://%s:%d/?token=***",
+                dashboard_host, actual_port,
+            )
+        stop_event.wait()   # block until tray quit or SIGTERM
         logger.info("Gmailbot shutting down cleanly.")
 
 

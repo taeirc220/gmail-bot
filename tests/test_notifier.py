@@ -92,12 +92,12 @@ class TestSend:
         call_kwargs = notifier._toast.show_toast.call_args
         assert call_kwargs.kwargs.get("title") == "My Title" or call_kwargs.args[0] == "My Title"
 
-    def test_send_raises_notifier_error_on_failure(self, notifier):
+    def test_send_returns_false_on_failure(self, notifier):
         notifier._toast.show_toast.side_effect = RuntimeError("Toast failed")
         with patch("src.notifier.datetime") as mock_dt:
             mock_dt.now.return_value.hour = 10
-            with pytest.raises(NotifierError, match="Failed to send notification"):
-                notifier.send("Title", "Body")
+            result = notifier.send("Title", "Body")
+        assert result is False   # logs warning, does not raise
 
 
 # -------------------------------------------------------------------------

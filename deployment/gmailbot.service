@@ -1,0 +1,17 @@
+[Unit]
+Description=Gmailbot — Gmail automation bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=gmailbot
+WorkingDirectory=/opt/gmailbot
+ExecStart=/opt/gmailbot/.venv/bin/python /opt/gmailbot/src/main.py
+Restart=on-failure
+RestartSec=30
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

@@ -347,10 +347,12 @@ def health():
 # ---------------------------------------------------------------------------
 
 def start_server(db_path: str, secret: str, port: int = 8080,
+                 host: str = "127.0.0.1",
                  whitelist_path: str = "", env_path: str = "") -> None:
     """
     Called from main.py in a background daemon thread.
     Sets module-level config and starts Flask.
+    host="127.0.0.1" for local-only (Windows); "0.0.0.0" for cloud server.
     """
     global _db_path, _secret, _whitelist_path, _env_path
     _db_path = db_path
@@ -358,12 +360,12 @@ def start_server(db_path: str, secret: str, port: int = 8080,
     _whitelist_path = whitelist_path
     _env_path = env_path
 
-    logger.info("Dashboard starting on http://localhost:%d/?token=***", port)
+    logger.info("Dashboard starting on http://%s:%d/?token=***", host, port)
     logging.getLogger("werkzeug").setLevel(logging.WARNING)
 
     try:
         app.run(
-            host="127.0.0.1",
+            host=host,
             port=port,
             debug=False,
             use_reloader=False,

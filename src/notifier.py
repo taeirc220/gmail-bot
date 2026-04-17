@@ -1,7 +1,12 @@
 """
-notifier.py — Windows desktop toast notification dispatch.
+notifier.py — Notification dispatch for Gmailbot.
 
-Uses plyer (which wraps win10toast on Windows) for native toast pop-ups.
+Two delivery paths:
+  1. ntfy.sh (cloud / phone) — used when NTFY_TOPIC is set in .env.
+     Works on Windows and Linux. Sends push notifications to the ntfy app.
+  2. Windows desktop toast — used when NTFY_TOPIC is not set.
+     Requires win10toast or plyer. Windows only.
+
 All notification dispatch for the bot goes through this module only.
 Handles quiet hours suppression and message formatting.
 """
@@ -26,10 +31,14 @@ class Notifier:
         self,
         quiet_hours_start: int = 22,
         quiet_hours_end: int = 7,
+        ntfy_topic: str = "",
+        ntfy_url: str = "https://ntfy.sh",
     ) -> None:
         self._quiet_start = quiet_hours_start
         self._quiet_end = quiet_hours_end
-        self._toast = self._load_toast()
+        self._ntfy_topic = ntfy_topic.strip()
+        self._ntfy_url = ntfy_url.rstrip("/")
+        self._toast = self._load_toast() if not self._ntfy_topic else None
 
     def _load_toast(self):
         """
@@ -56,10 +65,9 @@ class Notifier:
         force: bool = False,
     ) -> bool:
         """
-        Send a Windows toast notification.
+        Send a notification via ntfy.sh (cloud) or Windows toast (local).
 
         Returns True if sent, False if suppressed (quiet hours).
-        Raises NotifierError if delivery fails.
         force=True bypasses quiet hours (used for critical errors).
         """
         if not force and self.is_quiet_hours():
@@ -67,21 +75,36 @@ class Notifier:
             return False
 
         try:
-            self._dispatch(title, body, click_url)
+            if self._ntfy_topic:
+                self._send_ntfy(title, body, click_url)
+            else:
+                self._send_windows_toast(title, body, click_url)
             logger.info("Notification sent: %s", title)
             return True
         except Exception as exc:
-            raise NotifierError(f"Failed to send notification: {exc}") from exc
+            logger.warning("Failed to send notification '%s': %s", title, exc)
+            return False
 
-    def _dispatch(self, title: str, body: str, click_url: str | None) -> None:
-        """Internal: send via win10toast (with click support) or plyer."""
+    def _send_ntfy(self, title: str, body: str, click_url: str | None) -> None:
+        """POST to ntfy.sh — delivers push notification to phone/desktop ntfy app."""
+        import requests as _req
+        url = f"{self._ntfy_url}/{self._ntfy_topic}"
+        headers = {
+            "Title": title,
+            "Priority": "default",
+            "Tags": "bell",
+        }
+        if click_url:
+            headers["Click"] = click_url
+        _req.post(url, data=body.encode("utf-8"), headers=headers, timeout=10)
+
+    def _send_windows_toast(self, title: str, body: str, click_url: str | None) -> None:
+        """Send a native Windows toast via win10toast or plyer fallback."""
         if self._toast is not None:
-            # win10toast supports callback_on_click
             callback = None
             if click_url:
                 url = click_url
                 callback = lambda: webbrowser.open(url)
-
             self._toast.show_toast(
                 title=title,
                 msg=body,
