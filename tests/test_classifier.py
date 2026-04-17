@@ -249,3 +249,55 @@ def test_single_condition_not_enough_for_group_c(rules, db):
         raw_headers={"Precedence": "bulk"},
     )
     assert _is_group_c(email, rules) is False
+
+
+# -------------------------------------------------------------------------
+# Sender rules — user-defined overrides checked before all keyword logic
+# -------------------------------------------------------------------------
+
+class TestSenderRules:
+    def test_force_important_overrides_ignored(self, rules, db):
+        """An email that would normally be ignored becomes important via sender rule."""
+        email = _email(body_text="no keywords", list_unsubscribe=None)
+        db.set_sender_rule(email["sender_email"], "force_important")
+        result = classify(email, rules, db)
+        assert result == ("important", "user_rule")
+
+    def test_force_ignore_overrides_group_a(self, rules, db):
+        """A personal email is ignored when a force_ignore rule exists for the sender."""
+        email = _email(
+            body_text="Hey, I just wanted to check in with you. Let me know how you are.",
+        )
+        db.set_sender_rule(email["sender_email"], "force_ignore")
+        result = classify(email, rules, db)
+        assert result == ("ignored", None)
+
+    def test_force_newsletter_overrides_group_b(self, rules, db):
+        """A ticket email is treated as newsletter when force_newsletter rule exists."""
+        email = _email(
+            subject="Your ticket confirmation",
+            body_text="Please find your ticket attached. Booking reference 123.",
+            has_pdf=True,
+        )
+        db.set_sender_rule(email["sender_email"], "force_newsletter")
+        result = classify(email, rules, db)
+        assert result == ("newsletter", "high")
+
+    def test_no_rule_follows_normal_path(self, rules, db):
+        """Without a sender rule, classification proceeds normally."""
+        email = _email(
+            body_text="Hey, I just wanted to check in with you. Let me know how you are.",
+        )
+        result = classify(email, rules, db)
+        assert result[0] == "important"
+
+    def test_rule_fires_before_group_b_check(self, rules, db):
+        """force_ignore on a ticket email stops it before Group B logic runs."""
+        email = _email(
+            subject="Your e-ticket confirmation",
+            body_text="Your booking reference and seat assignment are attached.",
+            has_pdf=True,
+        )
+        db.set_sender_rule(email["sender_email"], "force_ignore")
+        result = classify(email, rules, db)
+        assert result == ("ignored", None)

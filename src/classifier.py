@@ -30,6 +30,20 @@ def classify(email: dict, rules: dict, db: Database) -> ClassificationResult:
     (some airlines/booking sites include them) but must still be classified as
     important tickets, not newsletters.
     """
+    # User-defined sender rules override ALL keyword logic
+    sender_rule = db.get_sender_rule(email.get("sender_email", "").lower())
+    if sender_rule:
+        rt = sender_rule["rule_type"]
+        if rt == "force_important":
+            logger.debug("Sender rule force_important: %s", email.get("sender_email"))
+            return ("important", "user_rule")
+        if rt == "force_newsletter":
+            logger.debug("Sender rule force_newsletter: %s", email.get("sender_email"))
+            return ("newsletter", "high")
+        if rt == "force_ignore":
+            logger.debug("Sender rule force_ignore: %s", email.get("sender_email"))
+            return ("ignored", None)
+
     if _is_group_b(email, rules):
         logger.debug("Classified as important/group_b: %s", email.get("subject"))
         return ("important", "group_b")

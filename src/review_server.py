@@ -33,6 +33,7 @@ from pathlib import Path
 
 from flask import Flask, abort, jsonify, redirect, request
 
+import src.bot_state as bot_state
 from src.database import Database
 from src.review_generator import (
     generate_dashboard,
@@ -129,8 +130,9 @@ def settings():
     _check_token()
     db = _get_db()
     entries = _load_whitelist()
-    dry_run = _get_dry_run_flag()
-    return generate_settings_page(db, _secret, entries, dry_run)
+    dry_run = bot_state.get_dry_run()   # live runtime state
+    sender_rules = db.get_all_sender_rules()
+    return generate_settings_page(db, _secret, entries, dry_run, sender_rules)
 
 
 # ---------------------------------------------------------------------------
@@ -235,7 +237,10 @@ def _set_dry_run_flag(value: bool) -> None:
 def api_dry_run_toggle():
     _check_token()
     current = _get_dry_run_flag()
-    _set_dry_run_flag(not current)
+    new_value = not current
+    _set_dry_run_flag(new_value)          # persist to .env
+    bot_state.set_dry_run(new_value)      # update live runtime immediately
+    logger.info("Safe Mode toggled: %s → %s", current, new_value)
     return redirect(f"/settings?token={_secret}")
 
 
@@ -254,6 +259,67 @@ def api_errors_resolve():
     db.mark_error_resolved(error_id)
     logger.info("Error %d marked as resolved", error_id)
     return redirect(f"/settings?token={_secret}")
+
+
+# ---------------------------------------------------------------------------
+# API — untrash (restore email from trash)
+# ---------------------------------------------------------------------------
+
+@app.route("/api/untrash", methods=["POST"])
+def api_untrash():
+    _check_token()
+    message_id = request.form.get("message_id", "").strip()
+    if not message_id:
+        abort(400, "message_id is required")
+
+    from src.auth import get_credentials, AuthError
+    from src.gmail_client import GmailClient, GmailAPIError
+
+    creds_path = os.getenv("GMAIL_CREDENTIALS_PATH", "credentials.json")
+    token_path  = os.getenv("GMAIL_TOKEN_PATH", "token.json")
+    try:
+        creds = get_credentials(creds_path, token_path)
+    except AuthError as exc:
+        logger.error("Untrash: auth failed: %s", exc)
+        abort(500, "authentication failure")
+
+    try:
+        GmailClient(creds).untrash_message(message_id)
+    except GmailAPIError as exc:
+        logger.error("Untrash failed for %s: %s", message_id, exc)
+        abort(500, f"Gmail API error: {exc}")
+
+    _get_db().update_action_taken(message_id, "restored_from_trash")
+    logger.info("Restored message %s from trash", message_id)
+    return redirect(f"/history?token={_secret}&toast=Email+restored+to+inbox")
+
+
+# ---------------------------------------------------------------------------
+# API — teach (set / remove sender rules)
+# ---------------------------------------------------------------------------
+
+@app.route("/api/teach", methods=["POST"])
+def api_teach():
+    _check_token()
+    sender_email = request.form.get("sender_email", "").strip().lower()
+    rule_type    = request.form.get("rule_type", "").strip()
+    redirect_to  = request.form.get("redirect", f"/history?token={_secret}")
+
+    if not sender_email:
+        abort(400, "sender_email is required")
+    valid = {"force_important", "force_ignore", "force_newsletter", "remove"}
+    if rule_type not in valid:
+        abort(400, "invalid rule_type")
+
+    db = _get_db()
+    if rule_type == "remove":
+        db.delete_sender_rule(sender_email)
+        logger.info("Sender rule removed: %s", sender_email)
+    else:
+        db.set_sender_rule(sender_email, rule_type)
+        logger.info("Sender rule set: %s → %s", sender_email, rule_type)
+
+    return redirect(redirect_to)
 
 
 # ---------------------------------------------------------------------------

@@ -24,9 +24,14 @@ def enforce_test_mode(monkeypatch):
     """
     Applied to every test automatically.
     Ensures no test can accidentally write to the real Gmail inbox.
+    Sets both the env var AND bot_state so the runtime dry-run flag is correct.
     """
+    import src.bot_state as _bot_state
     monkeypatch.setenv("DRY_RUN", "true")
     monkeypatch.setenv("TEST_MODE", "true")
+    _bot_state.set_dry_run(True)
+    yield
+    _bot_state.set_dry_run(False)
 
 
 # -------------------------------------------------------------------------

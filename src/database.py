@@ -16,7 +16,9 @@ VALID_CLASSIFICATIONS = {"important", "newsletter", "unsure", "ignored"}
 VALID_ACTIONS = {
     "notified", "trashed", "queued", "none",
     "dry_run_would_trash", "skipped_whitelist", "paused_bulk_limit",
+    "unsubscribed_and_trashed", "restored_from_trash",
 }
+VALID_RULE_TYPES = {"force_important", "force_ignore", "force_newsletter"}
 VALID_DECISIONS = {"keep", "unsubscribe", "trash_only"}
 
 
@@ -79,6 +81,14 @@ class Database:
             CREATE TABLE IF NOT EXISTS config (
                 key   TEXT PRIMARY KEY,
                 value TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS sender_rules (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                sender_email TEXT NOT NULL UNIQUE,
+                rule_type    TEXT NOT NULL,
+                set_by       TEXT NOT NULL DEFAULT 'user',
+                set_at       TEXT
             );
         """)
         self._conn.commit()
@@ -382,6 +392,62 @@ class Database:
             "UPDATE errors_log SET resolved = 1 WHERE id = ?", (error_id,)
         )
         self._conn.commit()
+
+    def update_action_taken(self, message_id: str, new_action: str) -> None:
+        """Update action_taken for an already-processed email (e.g. after untrash)."""
+        self._conn.execute(
+            "UPDATE emails_processed SET action_taken = ? WHERE message_id = ?",
+            (new_action, message_id),
+        )
+        self._conn.commit()
+        logger.debug("Updated action_taken for %s → %s", message_id, new_action)
+
+    # -------------------------------------------------------------------------
+    # sender_rules
+    # -------------------------------------------------------------------------
+
+    def get_sender_rule(self, sender_email: str) -> dict | None:
+        """Return the rule for this sender, or None if no rule exists."""
+        row = self._conn.execute(
+            "SELECT * FROM sender_rules WHERE sender_email = ?",
+            (sender_email.lower(),),
+        ).fetchone()
+        return dict(row) if row else None
+
+    def set_sender_rule(self, sender_email: str, rule_type: str,
+                        set_by: str = "user") -> None:
+        """Create or replace a sender rule. rule_type must be in VALID_RULE_TYPES."""
+        assert rule_type in VALID_RULE_TYPES, f"Invalid rule_type: {rule_type!r}"
+        self._conn.execute(
+            """
+            INSERT INTO sender_rules (sender_email, rule_type, set_by, set_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(sender_email) DO UPDATE SET
+                rule_type = excluded.rule_type,
+                set_by    = excluded.set_by,
+                set_at    = excluded.set_at
+            """,
+            (sender_email.lower(), rule_type, set_by, _utcnow()),
+        )
+        self._conn.commit()
+        logger.info("Sender rule set: %s → %s", sender_email, rule_type)
+
+    def delete_sender_rule(self, sender_email: str) -> None:
+        """Remove the rule for this sender."""
+        self._conn.execute(
+            "DELETE FROM sender_rules WHERE sender_email = ?",
+            (sender_email.lower(),),
+        )
+        self._conn.commit()
+        logger.info("Sender rule deleted: %s", sender_email)
+
+    def get_all_sender_rules(self) -> list[dict]:
+        """All sender rules, newest first."""
+        rows = self._conn.execute(
+            "SELECT sender_email, rule_type, set_by, set_at "
+            "FROM sender_rules ORDER BY set_at DESC"
+        ).fetchall()
+        return [dict(r) for r in rows]
 
     # -------------------------------------------------------------------------
     # Cleanup

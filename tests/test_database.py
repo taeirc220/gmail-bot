@@ -141,3 +141,70 @@ def test_update_history_id(db):
 
 def test_log_error_does_not_raise(db):
     db.log_error("GmailAPIError", "HTTP 429 rate limit exceeded")
+
+
+# -------------------------------------------------------------------------
+# update_action_taken
+# -------------------------------------------------------------------------
+
+def test_update_action_taken(db):
+    db.record_processed("msg_restore", "x@x.com", "Subject", "2024-01-01T10:00:00Z",
+                        "newsletter", "high", "unsubscribed_and_trashed")
+    db.update_action_taken("msg_restore", "restored_from_trash")
+    rows, _ = db.get_emails_page()
+    row = next(r for r in rows if r["message_id"] == "msg_restore")
+    assert row["action_taken"] == "restored_from_trash"
+
+
+def test_update_action_taken_nonexistent_is_noop(db):
+    db.update_action_taken("does_not_exist", "restored_from_trash")  # must not raise
+
+
+# -------------------------------------------------------------------------
+# sender_rules
+# -------------------------------------------------------------------------
+
+def test_set_and_get_sender_rule(db):
+    db.set_sender_rule("friend@gmail.com", "force_important")
+    rule = db.get_sender_rule("friend@gmail.com")
+    assert rule is not None
+    assert rule["rule_type"] == "force_important"
+    assert rule["sender_email"] == "friend@gmail.com"
+
+
+def test_sender_rule_case_insensitive(db):
+    db.set_sender_rule("Friend@Gmail.COM", "force_important")
+    rule = db.get_sender_rule("friend@gmail.com")
+    assert rule is not None
+
+
+def test_set_sender_rule_replaces_existing(db):
+    db.set_sender_rule("promo@shop.com", "force_newsletter")
+    db.set_sender_rule("promo@shop.com", "force_ignore")
+    rule = db.get_sender_rule("promo@shop.com")
+    assert rule["rule_type"] == "force_ignore"
+
+
+def test_delete_sender_rule(db):
+    db.set_sender_rule("temp@example.com", "force_ignore")
+    db.delete_sender_rule("temp@example.com")
+    assert db.get_sender_rule("temp@example.com") is None
+
+
+def test_get_all_sender_rules(db):
+    db.set_sender_rule("a@a.com", "force_important")
+    db.set_sender_rule("b@b.com", "force_newsletter")
+    rules = db.get_all_sender_rules()
+    emails = {r["sender_email"] for r in rules}
+    assert {"a@a.com", "b@b.com"} == emails
+
+
+def test_get_sender_rule_returns_none_when_absent(db):
+    assert db.get_sender_rule("nobody@example.com") is None
+
+
+def test_invalid_rule_type_raises(db):
+    import pytest
+    with pytest.raises(AssertionError):
+        db.set_sender_rule("x@x.com", "invalid_rule")
+

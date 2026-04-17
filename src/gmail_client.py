@@ -152,6 +152,17 @@ class GmailClient:
         except HttpError as exc:
             raise GmailAPIError(str(exc), exc.resp.status) from exc
 
+    def untrash_message(self, message_id: str) -> None:
+        """Restore a message from Trash back to the inbox."""
+        try:
+            self._service.users().messages().untrash(
+                userId=self._user,
+                id=message_id,
+            ).execute()
+            logger.info("Untrashed message %s", message_id)
+        except HttpError as exc:
+            raise GmailAPIError(str(exc), exc.resp.status) from exc
+
     def send_email(
         self,
         to: str,

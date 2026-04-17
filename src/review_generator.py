@@ -1,5 +1,5 @@
 """
-review_generator.py — Generates all HTML pages for the Gmail Bot dashboard.
+review_generator.py — Generates all HTML pages for the Gmailbot dashboard.
 
 Pages:
   /           Dashboard  — stats, activity chart, recent activity
@@ -252,6 +252,29 @@ _STATUSBAR_JS = """
 """
 
 
+_ACTION_LABELS: dict[str, str] = {
+    "notified":               "Notified",
+    "deleted":                "Moved to trash",
+    "trashed":                "Moved to trash",
+    "dry_run_would_trash":    "Safe mode — skipped",
+    "queued_review":          "Queued for review",
+    "queued":                 "Queued for review",
+    "none":                   "No action",
+    "actioned":               "Actioned",
+    "unsubscribed_trashed":   "Unsubscribed & trashed",
+    "unsubscribed_and_trashed": "Unsubscribed & trashed",
+    "skipped_whitelist":      "Whitelisted — skipped",
+    "paused_bulk_limit":      "Bulk limit — paused",
+    "restored_from_trash":    "Restored from trash",
+}
+
+_RULE_LABELS: dict[str, str] = {
+    "force_important":   "Always Important",
+    "force_ignore":      "Always Ignore",
+    "force_newsletter":  "Always Newsletter",
+}
+
+
 def _tooltip(label: str, tip: str) -> str:
     return (f'<span class="tooltip-wrap">{label}'
             f'<span class="tooltip-icon">ⓘ</span>'
@@ -274,13 +297,13 @@ def _layout(page: str, content: str, secret: str, stats: dict | None = None) -> 
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Gmail Bot — {page}</title>
+  <title>Gmailbot — {page}</title>
   {_BASE_CSS}
   {_CHARTJS_CDN}
 </head>
 <body>
   <nav class="sidebar">
-    <div class="sidebar-brand">Gmail Bot</div>
+    <div class="sidebar-brand">Gmailbot</div>
     <div class="sidebar-sub">Local dashboard</div>
     <div class="status-row">
       <div class="status-dot"></div>
@@ -428,10 +451,19 @@ def generate_dashboard(db: Database, secret: str) -> str:
 
     # Recent activity feed
     if recent:
+        def _feed_action(r: dict) -> str:
+            if r["classification"] in ("newsletter", "important"):
+                label = _ACTION_LABELS.get(r.get("action_taken") or "", "")
+                if label:
+                    return (f'<span style="font-size:11px;color:#5f6368;'
+                            f'flex-shrink:0;">{_esc(label)}</span>')
+            return ""
+
         feed_items = "\n".join(
             f'<div class="feed-item">'
             f'  <div class="feed-sender">{_esc(r["sender"] or "(unknown)")}</div>'
             f'  {_badge(r["classification"], r["classification"])}'
+            f'  {_feed_action(r)}'
             f'  <span class="feed-time">{_time_ago(r["processed_at"] or "")}</span>'
             f'</div>'
             for r in recent
@@ -455,7 +487,7 @@ def generate_dashboard(db: Database, secret: str) -> str:
     content = f"""
     <div class="page-header">
       <div class="page-title">Dashboard</div>
-      <div class="page-sub">Overview of Gmail Bot activity</div>
+      <div class="page-sub">Overview of Gmailbot activity</div>
     </div>
     {cards}
     {chart_panel}
@@ -637,16 +669,16 @@ def generate_history_page(db: Database, secret: str,
         "ignored":    "Ignored",
         "unsure":     "Needs review",
     }
-    _ACTION_LABELS = {
-        "notified":             "Notified",
-        "deleted":              "Moved to trash",
-        "dry_run_would_trash":  "Safe mode — skipped",
-        "queued_review":        "Queued for review",
-        "queued":               "Queued for review",
-        "none":                 "No action",
-        "actioned":             "Actioned",
-        "unsubscribed_trashed": "Unsubscribed & trashed",
-    }
+
+    def _restore_btn(r: dict) -> str:
+        if r.get("action_taken") == "unsubscribed_and_trashed":
+            mid = _esc(r.get("message_id") or "")
+            return (f'<form method="POST" action="/api/untrash?token={secret}"'
+                    f' style="display:inline;margin-left:6px;">'
+                    f'<input type="hidden" name="message_id" value="{mid}">'
+                    f'<button type="submit" class="btn btn-ghost btn-sm">Restore</button>'
+                    f'</form>')
+        return ""
 
     # Table rows
     if rows:
@@ -658,10 +690,27 @@ def generate_history_page(db: Database, secret: str,
                          white-space:nowrap;">{_esc(r["subject"] or "(no subject)")}</td>
               <td>{_badge(r["classification"],
                           _CLASSIFICATION_LABELS.get(r["classification"], r["classification"]))}</td>
-              <td style="color:#5f6368;font-size:12px;">{_esc(
-                          _ACTION_LABELS.get(r["action_taken"] or "", r["action_taken"] or ""))}</td>
+              <td style="color:#5f6368;font-size:12px;">
+                {_esc(_ACTION_LABELS.get(r["action_taken"] or "", r["action_taken"] or ""))}
+                {_restore_btn(r)}
+              </td>
               <td style="color:#9aa0a6;font-size:12px;white-space:nowrap;">
                 {_fmt_date(r["processed_at"] or "")}</td>
+              <td>
+                <form method="POST" action="/api/teach?token={secret}" style="display:inline;">
+                  <input type="hidden" name="sender_email" value="{_esc(r.get('sender') or '')}">
+                  <input type="hidden" name="redirect"
+                         value="/history?token={secret}&classification={classification}&page={page}">
+                  <select name="rule_type" onchange="this.form.submit()"
+                          style="font-size:11px;padding:3px 6px;border:1px solid #dadce0;
+                                 border-radius:4px;color:#5f6368;background:#fff;cursor:pointer;">
+                    <option value="">Teach bot...</option>
+                    <option value="force_important">Always Important</option>
+                    <option value="force_ignore">Always Ignore</option>
+                    <option value="force_newsletter">Always Newsletter</option>
+                  </select>
+                </form>
+              </td>
             </tr>"""
             for r in rows
         )
@@ -669,7 +718,7 @@ def generate_history_page(db: Database, secret: str,
         <table>
           <thead><tr>
             <th>Sender</th><th>Subject</th><th>Category</th>
-            <th>What we did</th><th>Processed</th>
+            <th>What we did</th><th>Processed</th><th>Teach bot</th>
           </tr></thead>
           <tbody>{tr_html}</tbody>
         </table>"""
@@ -772,7 +821,8 @@ def generate_decisions_page(db: Database, secret: str) -> str:
 
 def generate_settings_page(db: Database, secret: str,
                             whitelist_entries: list[str],
-                            dry_run: bool) -> str:
+                            dry_run: bool,
+                            sender_rules: list[dict] | None = None) -> str:
     stats = db.get_stats()
     errors = db.get_recent_errors(limit=20)
 
@@ -872,12 +922,47 @@ def generate_settings_page(db: Database, secret: str,
       {err_table}
     </div>"""
 
+    # Sender rules panel
+    rules = sender_rules or []
+    rules_title = _tooltip("Sender Rules",
+                           "Your per-sender overrides. These take priority over all "
+                           "other classification logic.")
+    if rules:
+        rule_rows = "\n".join(
+            f"""<div class="whitelist-entry">
+              <span class="wl-text">{_esc(r["sender_email"])}</span>
+              <span class="badge badge-{'important' if r['rule_type']=='force_important'
+                                        else 'newsletter' if r['rule_type']=='force_newsletter'
+                                        else 'ignored'}" style="margin-right:8px;">
+                {_esc(_RULE_LABELS.get(r["rule_type"], r["rule_type"]))}
+              </span>
+              <form method="POST" action="/api/teach?token={secret}">
+                <input type="hidden" name="sender_email" value="{_esc(r['sender_email'])}">
+                <input type="hidden" name="rule_type"    value="remove">
+                <input type="hidden" name="redirect"     value="/settings?token={secret}">
+                <button type="submit" class="btn btn-red btn-sm">Remove</button>
+              </form>
+            </div>"""
+            for r in rules
+        )
+    else:
+        rule_rows = """<div class="empty-state" style="padding:16px 0;text-align:left;">
+          No rules yet — use the "Teach bot..." dropdown in History to add one.
+        </div>"""
+
+    rules_panel = f"""
+    <div class="panel">
+      <div class="panel-title">{rules_title}</div>
+      {rule_rows}
+    </div>"""
+
     content = f"""
     <div class="page-header">
       <div class="page-title">Settings</div>
       <div class="page-sub">Manage whitelist, bot mode, and view errors</div>
     </div>
     {mode_panel}
+    {rules_panel}
     {whitelist_panel}
     {errors_panel}"""
 

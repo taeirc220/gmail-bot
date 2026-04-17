@@ -3,6 +3,7 @@
 import pytest
 from unittest.mock import MagicMock, patch
 
+import src.bot_state as bot_state
 from src.newsletter_manager import NewsletterManager, BULK_LIMIT
 from src.database import Database
 
@@ -40,6 +41,7 @@ def empty_whitelist(tmp_path):
 
 
 def _make_manager(db, gmail, notifier, whitelist, dry_run=False):
+    bot_state.set_dry_run(dry_run)
     return NewsletterManager(
         gmail_client=gmail,
         db=db,

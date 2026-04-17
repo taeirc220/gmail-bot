@@ -15,6 +15,7 @@ from pathlib import Path
 
 import requests as http_requests
 
+import src.bot_state as bot_state
 from src.database import Database
 from src.gmail_client import GmailClient, GmailAPIError
 from src.notifier import Notifier
@@ -36,7 +37,6 @@ class NewsletterManager:
         self._client = gmail_client
         self._db = db
         self._notifier = notifier
-        self._dry_run = dry_run
         self._whitelist = self._load_whitelist(whitelist_path)
         self._deletion_count = 0
         logger.info(
@@ -79,7 +79,7 @@ class NewsletterManager:
             return self._queue_for_review(email)
 
         # 3. DRY_RUN mode — log, record, do not touch Gmail
-        if self._dry_run:
+        if bot_state.get_dry_run():
             logger.info(
                 "[DRY RUN] Would have unsubscribed and trashed: %s | %s",
                 email.get("sender_email"),
@@ -282,7 +282,7 @@ class NewsletterManager:
                 self._db.mark_review_actioned(message_id)
 
             elif decision in ("unsubscribe", "trash_only"):
-                if self._dry_run:
+                if bot_state.get_dry_run():
                     logger.info(
                         "[DRY RUN] Would execute review decision '%s' for %s",
                         decision, review["sender"],

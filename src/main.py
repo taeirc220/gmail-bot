@@ -31,6 +31,7 @@ from src.database import Database
 from src.gmail_client import GmailClient, GmailAPIError
 from src.newsletter_manager import NewsletterManager
 from src.notifier import Notifier
+import src.bot_state as bot_state
 import src.review_server as review_server
 from src.tray_icon import TrayIcon
 
@@ -71,7 +72,7 @@ def load_config() -> dict:
         "review_secret": os.getenv("REVIEW_SERVER_SECRET"),
         "review_port": int(os.getenv("REVIEW_SERVER_PORT", "8080")),
         "db_path": os.getenv("DB_PATH", "data/gmail_bot.db"),
-        "dry_run": os.getenv("DRY_RUN", "false").lower() == "true",
+        "dry_run": os.getenv("DRY_RUN", "true").lower() == "true",
         "test_mode": os.getenv("TEST_MODE", "false").lower() == "true",
         "quiet_hours_start": int(os.getenv("QUIET_HOURS_START", "22")),
         "quiet_hours_end": int(os.getenv("QUIET_HOURS_END", "7")),
@@ -382,6 +383,8 @@ def main() -> None:
         logger.critical("Configuration error: %s", exc)
         sys.exit(1)
 
+    bot_state.set_dry_run(config["dry_run"])
+
     if config["dry_run"]:
         logger.warning("DRY_RUN mode is ENABLED — no destructive actions will be taken")
     if config["test_mode"]:
@@ -436,7 +439,7 @@ def main() -> None:
     # ----------------------------------------------------------------
     try:
         notifier.send(
-            "Gmail Bot is running",
+            "Gmailbot is running",
             "Click the tray icon to open your dashboard.",
             force=True,
         )
