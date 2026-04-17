@@ -258,6 +258,132 @@ class Database:
         self.set_config("last_history_id", history_id)
 
     # -------------------------------------------------------------------------
+    # Dashboard queries
+    # -------------------------------------------------------------------------
+
+    def get_stats(self) -> dict:
+        """Aggregate counts for dashboard stat cards."""
+        total = self._conn.execute(
+            "SELECT COUNT(*) AS cnt FROM emails_processed"
+        ).fetchone()["cnt"]
+
+        important = self._conn.execute(
+            "SELECT COUNT(*) AS cnt FROM emails_processed WHERE classification = 'important'"
+        ).fetchone()["cnt"]
+
+        newsletters = self._conn.execute(
+            "SELECT COUNT(*) AS cnt FROM emails_processed WHERE classification = 'newsletter'"
+        ).fetchone()["cnt"]
+
+        ignored = self._conn.execute(
+            "SELECT COUNT(*) AS cnt FROM emails_processed WHERE classification = 'ignored'"
+        ).fetchone()["cnt"]
+
+        today = self._conn.execute(
+            "SELECT COUNT(*) AS cnt FROM emails_processed "
+            "WHERE DATE(processed_at) = DATE('now')"
+        ).fetchone()["cnt"]
+
+        pending = self.pending_review_count()
+
+        errors = self._conn.execute(
+            "SELECT COUNT(*) AS cnt FROM errors_log WHERE resolved = 0"
+        ).fetchone()["cnt"]
+
+        return {
+            "total_processed": total,
+            "total_important": important,
+            "total_newsletters": newsletters,
+            "total_ignored": ignored,
+            "today_processed": today,
+            "pending_reviews": pending,
+            "unresolved_errors": errors,
+        }
+
+    def get_recent_emails(self, limit: int = 50) -> list[dict]:
+        """Most recently processed emails, newest first."""
+        rows = self._conn.execute(
+            """
+            SELECT message_id, sender, subject, classification,
+                   classification_detail, action_taken, processed_at
+            FROM emails_processed
+            ORDER BY processed_at DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_emails_page(self, page: int = 1, per_page: int = 25,
+                        classification: str | None = None) -> tuple[list[dict], int]:
+        """Paginated email history with optional classification filter.
+        Returns (rows, total_count).
+        """
+        base = "FROM emails_processed"
+        params: list = []
+        if classification and classification != "all":
+            base += " WHERE classification = ?"
+            params.append(classification)
+
+        total = self._conn.execute(
+            f"SELECT COUNT(*) AS cnt {base}", params
+        ).fetchone()["cnt"]
+
+        offset = (page - 1) * per_page
+        rows = self._conn.execute(
+            f"SELECT message_id, sender, subject, classification, "
+            f"classification_detail, action_taken, processed_at {base} "
+            f"ORDER BY processed_at DESC LIMIT ? OFFSET ?",
+            params + [per_page, offset],
+        ).fetchall()
+        return [dict(r) for r in rows], total
+
+    def get_activity_by_day(self, days: int = 7) -> list[dict]:
+        """Per-day counts by classification for the last N days (for Chart.js)."""
+        rows = self._conn.execute(
+            """
+            SELECT
+                DATE(processed_at) AS date,
+                SUM(CASE WHEN classification = 'important'  THEN 1 ELSE 0 END) AS important,
+                SUM(CASE WHEN classification = 'newsletter' THEN 1 ELSE 0 END) AS newsletter,
+                SUM(CASE WHEN classification = 'ignored'    THEN 1 ELSE 0 END) AS ignored,
+                SUM(CASE WHEN classification = 'unsure'     THEN 1 ELSE 0 END) AS unsure
+            FROM emails_processed
+            WHERE DATE(processed_at) >= DATE('now', ? || ' days')
+            GROUP BY DATE(processed_at)
+            ORDER BY date ASC
+            """,
+            (f"-{days}",),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_all_decisions(self) -> list[dict]:
+        """All newsletter sender decisions, newest first."""
+        rows = self._conn.execute(
+            """
+            SELECT sender, domain, decision, decided_by, decided_at
+            FROM newsletter_decisions
+            ORDER BY decided_at DESC
+            """
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_recent_errors(self, limit: int = 20) -> list[dict]:
+        """Most recent errors from errors_log."""
+        rows = self._conn.execute(
+            "SELECT id, timestamp, error_type, message, resolved "
+            "FROM errors_log ORDER BY timestamp DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def mark_error_resolved(self, error_id: int) -> None:
+        self._conn.execute(
+            "UPDATE errors_log SET resolved = 1 WHERE id = ?", (error_id,)
+        )
+        self._conn.commit()
+
+    # -------------------------------------------------------------------------
     # Cleanup
     # -------------------------------------------------------------------------
 

@@ -360,16 +360,18 @@ def main() -> None:
     except AuthError:
         sys.exit(1)
 
-    # Start the review server in a background daemon thread
+    # Start the dashboard server in a background daemon thread
+    env_path = str(Path(__file__).parent.parent / ".env")
     review_thread = threading.Thread(
         target=review_server.start_server,
         args=(config["db_path"], config["review_secret"], config["review_port"]),
+        kwargs={"whitelist_path": config["whitelist_path"], "env_path": env_path},
         daemon=True,
         name="ReviewServer",
     )
     review_thread.start()
     logger.info(
-        "Review server running at http://localhost:%d/review", config["review_port"]
+        "Dashboard running at http://localhost:%d/?token=***", config["review_port"]
     )
 
     overnight_buffer: list = []
