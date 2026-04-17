@@ -13,7 +13,7 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 GMAIL_URL = "https://mail.google.com/mail/u/0/#inbox/{message_id}"
-APP_NAME = "Gmail Bot"
+APP_NAME = "Gmailbot"
 TOAST_DURATION = 6  # seconds before toast fades
 
 

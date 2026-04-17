@@ -22,6 +22,12 @@ import socket
 import yaml
 from dotenv import load_dotenv
 
+try:
+    import webview as _webview
+    _WEBVIEW_AVAILABLE = True
+except ImportError:
+    _WEBVIEW_AVAILABLE = False
+
 # Ensure src/ is importable when running as a script
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -467,13 +473,60 @@ def main() -> None:
         send_overnight_digest, notifier, overnight_buffer
     )
 
-    logger.info("Polling started. Press Ctrl+C to stop.")
+    # ----------------------------------------------------------------
+    # Scheduler loop — runs in a background thread so the main thread
+    # is free to host the pywebview event loop (webview.start blocks).
+    # ----------------------------------------------------------------
+    def _scheduler_loop():
+        logger.info("Polling started.")
+        while not stop_event.is_set():
+            schedule.run_pending()
+            time.sleep(30)
+        logger.info("Scheduler loop stopped.")
 
-    while not stop_event.is_set():
-        schedule.run_pending()
-        time.sleep(30)
+    scheduler_thread = threading.Thread(
+        target=_scheduler_loop, daemon=True, name="Scheduler"
+    )
+    scheduler_thread.start()
 
-    logger.info("Gmail Bot shutting down cleanly.")
+    # ----------------------------------------------------------------
+    # Desktop dashboard window (pywebview)
+    # If pywebview is unavailable, fall back to browser-only mode.
+    # ----------------------------------------------------------------
+    dashboard_url = (
+        f"http://localhost:{actual_port}/?token={config['review_secret']}"
+    )
+
+    if _WEBVIEW_AVAILABLE:
+        import webview
+        window = webview.create_window(
+            "Gmailbot",
+            dashboard_url,
+            hidden=True,
+            width=1280,
+            height=800,
+            min_size=(900, 600),
+        )
+
+        def _on_closing():
+            # Hide instead of destroy — bot keeps running when user closes the window.
+            threading.Thread(target=window.hide, daemon=True).start()
+            return False  # cancel default destruction
+
+        window.events.closing += _on_closing
+
+        # Give the tray icon access so it can show/destroy the window.
+        tray.set_window(window)
+
+        logger.info("Starting desktop dashboard window.")
+        webview.start()   # blocks main thread until window.destroy() is called
+        logger.info("Gmailbot shutting down cleanly.")
+    else:
+        # No pywebview — stay in browser-only mode, keep scheduler running.
+        logger.warning("pywebview not available — dashboard runs in browser only.")
+        while not stop_event.is_set():
+            time.sleep(30)
+        logger.info("Gmailbot shutting down cleanly.")
 
 
 if __name__ == "__main__":

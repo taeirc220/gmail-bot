@@ -37,9 +37,9 @@ _COLOURS = {
 }
 
 _TITLES = {
-    "running": "Gmail Bot — Running",
-    "paused":  "Gmail Bot — Paused",
-    "error":   "Gmail Bot — Error",
+    "running": "Gmailbot — Running",
+    "paused":  "Gmailbot — Paused",
+    "error":   "Gmailbot — Error",
 }
 
 
@@ -84,6 +84,11 @@ class TrayIcon:
         self._stop_event = stop_event
         self._icon: "pystray.Icon | None" = None
         self._status = "running"
+        self._window = None   # set later via set_window() once pywebview creates it
+
+    def set_window(self, window) -> None:
+        """Attach the pywebview window so the tray can show/hide/destroy it."""
+        self._window = window
 
     # ------------------------------------------------------------------
     # Public API (thread-safe)
@@ -98,7 +103,7 @@ class TrayIcon:
         try:
             menu = pystray.Menu(
                 pystray.MenuItem(
-                    "Gmail Bot",
+                    "Gmailbot",
                     None,
                     enabled=False,          # status header — non-clickable
                 ),
@@ -115,7 +120,7 @@ class TrayIcon:
                     checked=lambda item: self._pause_event.is_set(),
                 ),
                 pystray.Menu.SEPARATOR,
-                pystray.MenuItem("Quit Gmail Bot", self._quit),
+                pystray.MenuItem("Quit Gmailbot", self._quit),
             )
 
             self._icon = pystray.Icon(
@@ -152,9 +157,16 @@ class TrayIcon:
     # ------------------------------------------------------------------
 
     def _open_dashboard(self, icon=None, item=None) -> None:
+        if self._window is not None:
+            try:
+                self._window.show()
+                logger.info("Dashboard window shown from tray")
+                return
+            except Exception as exc:
+                logger.debug("window.show() failed (%s) — falling back to browser", exc)
         url = f"http://localhost:{self._port}/?token={self._secret}"
         webbrowser.open(url)
-        logger.info("Dashboard opened from tray")
+        logger.info("Dashboard opened in browser from tray")
 
     def _toggle_pause(self, icon=None, item=None) -> None:
         if self._pause_event.is_set():
@@ -169,5 +181,10 @@ class TrayIcon:
     def _quit(self, icon=None, item=None) -> None:
         logger.info("Quit requested via tray icon")
         self._stop_event.set()
+        if self._window is not None:
+            try:
+                self._window.destroy()   # unblocks webview.start() on main thread
+            except Exception as exc:
+                logger.debug("window.destroy() failed: %s", exc)
         if self._icon is not None:
             self._icon.stop()
