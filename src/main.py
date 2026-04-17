@@ -25,7 +25,7 @@ from dotenv import load_dotenv
 try:
     from PySide6.QtWidgets import QApplication, QMainWindow
     from PySide6.QtWebEngineWidgets import QWebEngineView
-    from PySide6.QtCore import QUrl
+    from PySide6.QtCore import QUrl, QObject, Signal
     _QT_AVAILABLE = True
 except ImportError:
     _QT_AVAILABLE = False
@@ -518,15 +518,26 @@ def main() -> None:
         qt_win.setCentralWidget(web_view)
         # Hidden at startup — user opens via tray icon
 
+        # Qt UI calls must happen on the main thread. pystray callbacks run on
+        # their own thread, so we use signals (which are always delivered on the
+        # main thread) instead of calling qt_win methods directly.
+        class _Bridge(QObject):
+            show_requested = Signal()
+            quit_requested = Signal()
+
+        bridge = _Bridge()
+        bridge.show_requested.connect(
+            lambda: (qt_win.show(), qt_win.raise_(), qt_win.activateWindow())
+        )
+        bridge.quit_requested.connect(qt_app.quit)
+
         class _WindowAdapter:
-            """Adapter so TrayIcon can call .show()/.destroy() generically."""
+            """Adapter so TrayIcon can call .show()/.destroy() from any thread."""
             def show(self):
-                qt_win.show()
-                qt_win.raise_()
-                qt_win.activateWindow()
+                bridge.show_requested.emit()
 
             def destroy(self):
-                qt_app.quit()   # unblocks qt_app.exec() below
+                bridge.quit_requested.emit()
 
         tray.set_window(_WindowAdapter())
 
